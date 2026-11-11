@@ -1,0 +1,141 @@
+{
+  "faculty_deep_reasoning_mode": "ultrathink",
+  "faculty_optional_gates": [],
+  "faculty_gate_version": 4,
+  "permissions": {
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/secrets/**)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)"
+    ],
+    "ask": [
+      "Bash(rm -rf:*)",
+      "Bash(docker:*)"
+    ],
+    "allow": [
+      "Bash(git:*)",
+      "Bash(glab:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(uv:*)",
+      "Bash(pytest:*)",
+      "Bash(ruff:*)",
+      "Bash(mypy:*)",
+      "Bash(make:*)",
+      "Bash(faculty:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "mcp__faculty__*"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate session-start"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate design-spec"
+          },
+          {
+            "type": "command",
+            "command": "faculty gate red-team"
+          },
+          {
+            "type": "command",
+            "command": "faculty gate security-review"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate scaffold-spec"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate pre-commit-checks"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate pre-push-walkthrough"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate pre-push-checks"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate push-scans"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate tag-changelog"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate changelog-entry"
+          }
+        ]
+      }
+    ]
+  },
+  "mcpServers": {
+    "faculty": {
+      "command": "faculty",
+      "args": [
+        "mcp",
+        "serve"
+      ]
+    }
+  }
+}

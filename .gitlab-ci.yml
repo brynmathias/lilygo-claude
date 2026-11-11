@@ -1,0 +1,66 @@
+stages:
+  - lint
+  - test
+  - build
+  - security
+  - publish
+
+default:
+  image: dhi.io/python:3-debian13-sfw-ent-dev
+
+# --- AI review (knowledge-store-grounded) ---
+# The PII gate runs first, in an EARLIER stage, and is NOT allow_failure — if it
+# finds PII it hard-fails and the pipeline stops, so nothing reaches the review
+# model. The review itself is advisory (allow_failure) and blocks a merge only via
+# the blocking discussions it opens (enable "All threads must be resolved").
+# The review uses the baked review image (org/BU knowledge is inside it, project
+# scope comes from this checkout). The PII gate deliberately runs in a CLEAN stock
+# Python 3.13 image with ONLY faculty-pii-gate — it must catch PII before anything
+# that could reach Claude (the review image ships the Claude CLI + Anthropic key)
+# is in scope. Requires ANTHROPIC_API_KEY + REVIEWER_GITLAB_TOKEN (review) and
+# UV_EXTRA_INDEX_URL (JFrog, both) as group CI variables — see
+# faculty-review-image/GITLAB-SETUP.md.
+
+pii-gate:
+  stage: test
+  image: ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+  variables:
+    GIT_DEPTH: "0"  # full history so the merge-base diff resolves
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
+    - uv tool install faculty-standards --with faculty-pii-gate  # UV_EXTRA_INDEX_URL = JFrog index (CI var)
+    - export PATH="/root/.local/bin:$PATH"
+  script:
+    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - faculty pii-gate --target "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+
+ai-review:
+  stage: security
+  image: registry.gitlab.com/facultyai/customer-engineering/claude-code-setup-playground/faculty-claude-management/review:latest
+  allow_failure: true  # infra failure must never block; the verdict blocks via threads
+  variables:
+    GIT_DEPTH: "0"
+    IS_SANDBOX: "1"   # allow the Claude CLI's bypassPermissions under root (CI)
+  rules:
+    - if: $CI_MERGE_REQUEST_IID
+  script:
+    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - faculty review --target "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+
+# --- GitLab security suite (ci-security-jobs standard) ---
+# SAST, Secret Detection and Dependency Scanning come from GitLab's own
+# templates — do not hand-roll bandit/gitleaks jobs alongside them. Services
+# that build images add Container Scanning in their own CI files.
+# Off GitLab (client infrastructure), cover the same layers with open-source
+# or client-provided tooling and record in the project spec which tool covers
+# which layer.
+#
+# This include block MUST stay at the end of the file: `faculty scaffold add`
+# appends per-service `- local:` entries to it (workspace.add_ci_include
+# appends at end-of-file).
+include:
+  - template: Jobs/SAST.gitlab-ci.yml
+  - template: Jobs/Secret-Detection.gitlab-ci.yml
+  - template: Jobs/Dependency-Scanning.gitlab-ci.yml

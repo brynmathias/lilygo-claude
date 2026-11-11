@@ -1,0 +1,10 @@
+{
+  "default": {
+    "data": "synthetic-or-public",
+    "pii": "no",
+    "reach": "local-only",
+    "actors": "trusted",
+    "purpose": "experiment",
+    "stage": "explore"
+  }
+}

@@ -1,0 +1,118 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate codex session-start",
+            "timeout": 3600,
+            "async": false
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate codex design-spec",
+            "timeout": 3600,
+            "async": false
+          },
+          {
+            "type": "command",
+            "command": "faculty gate codex red-team",
+            "timeout": 3600,
+            "async": false
+          },
+          {
+            "type": "command",
+            "command": "faculty gate codex security-review",
+            "timeout": 3600,
+            "async": false
+          }
+        ],
+        "matcher": "^apply_patch$"
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate codex scaffold-spec",
+            "timeout": 3600,
+            "async": false
+          }
+        ],
+        "matcher": "^Bash$"
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate codex pre-commit-checks",
+            "timeout": 3600,
+            "async": false
+          }
+        ],
+        "matcher": "^Bash$"
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate codex pre-push-walkthrough",
+            "timeout": 3600,
+            "async": false
+          }
+        ],
+        "matcher": "^Bash$"
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate codex pre-push-checks",
+            "timeout": 3600,
+            "async": false
+          }
+        ],
+        "matcher": "^Bash$"
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate codex push-scans",
+            "timeout": 3600,
+            "async": false
+          }
+        ],
+        "matcher": "^Bash$"
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate codex tag-changelog",
+            "timeout": 3600,
+            "async": false
+          }
+        ],
+        "matcher": "^Bash$"
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "faculty gate codex changelog-entry",
+            "timeout": 3600,
+            "async": false
+          }
+        ],
+        "matcher": "^Bash$"
+      }
+    ]
+  }
+}

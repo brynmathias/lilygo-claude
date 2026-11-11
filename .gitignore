@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+.ruff_cache/
+node_modules/
+.env
+.DS_Store
+
+.claude/settings.local.json
+
+# PlatformIO build output and editor files
+.pio/
+.vscode/

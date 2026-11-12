@@ -202,8 +202,9 @@ must hold the essentials on its own, and the 9-key layout adds to it.
 ### Mode picker (on the device, both states)
 
 **Opening it.** Each profile or mode sets how the picker opens: the
-Mode key (the default: the **last** key, 9 or 4 without the expansion,
-which always shows the current mode) or `chord` (hold the knob and tap
+Mode key (the default: key 9, which always shows the current mode; the
+main unit alone has no Mode key, and the Mac picks modes from its menu
+bar) or `chord` (hold the knob and tap
 any key). WoW uses `chord`. While the knob is held, its
 press is held back: it only counts as a press if no key was tapped
 before it was released.
@@ -252,22 +253,25 @@ WoW mapping:
 These are the same modes as the old pad, with labels on the keys.
 
 Faces are emoji only, except key 8 (text). Changed 2026-11-11 at the
-owner's request: Talk on key 1, Mode on the last key.
+owner's request: Talk on key 1, Mode on the last key. Claude mode
+reordered 2026-11-12 (owner's request).
 
 | Key | Every mode | Claude | iTerm | Browser | Meet | Apps |
 |---|---|---|---|---|---|---|
 | 1 | 🎤 Talk: tap = Enter (Meet: mic), hold = push-to-talk | | | | | |
-| 2 | 🧹 Clear | | | ❌ close tab | | |
-| 3 | mode's main action | ✋ Esc | 🪟 pane | 🔙 back | 📷 camera | ✋ Esc |
+| 2 | | ⬅️ prev tab | 🧹 Clear | ❌ close tab | 🧹 Clear | 🧹 Clear |
+| 3 | | ➡️ next tab | 🪟 pane | 🔙 back | 📷 camera | ✋ Esc |
 | 4 | | ✅ Enter | ⬅️ tab | ◀️ tab | ✋ hand | ✅ Enter |
 | 5 | | 🪟 next pane | ➡️ tab | ▶️ tab | 💬 captions | ➡️ Tab |
-| 6 | | ⬅️ prev tab | | | | |
-| 7 | | ➡️ next tab | | | | |
+| 6 | | 🧹 Clear | | | | |
+| 7 | | 🛑 Stop (Esc) | | | | |
 | 8 | knob mode as text: Scroll / Volume / Brightness | | | | | |
 | 9 | Mode (emoji of the current mode) | | | | | |
 
-Without the expansion: keys 1–3 as above, Mode on key 4. The knob turns
-by its knob mode (Scroll = the mode's up/down) and its press is select.
+Without the expansion there is no Mode key; modes are picked from the
+menu bar. Claude: 🎤 Talk, ⬅️ prev tab, ➡️ next tab, ✅ Enter. Other
+modes: keys 1–3 as above, key 4 blank. The knob turns by its knob mode
+(Scroll = the mode's up/down) and its press is select.
 
 ## Spike results (2026-11-11)
 

@@ -3,11 +3,11 @@
 --
 -- Keys (1-based, main unit 1–4, expansion 5–9):
 --   1 Talk: tap = Enter (or the mode's `tap`), hold = push-to-talk
---   2 Clear (or the mode's `clear`)
---   3 the mode's `pad4` role; 4–7 its `pad9` roles (with the expansion)
+--   2–3 the mode's `pad4` roles; 2–7 its `pad9` roles (with the expansion)
 --   8 knob mode: nav / volume / brightness (with the expansion)
---   last key (9, or 4 without the expansion): Mode, handled on the device
---     (opens the picker, sends MODE <name>)
+--   9 (with the expansion): Mode, handled on the device (opens the picker,
+--     sends MODE <name>). Without the expansion there is no Mode key: key 4
+--     is the mode's, and modes are picked from the menu bar.
 -- Knob: turn = knob mode (nav = mode up/down), press = select.
 
 local modes, faces = ... -- passed in by the loader (init.lua)
@@ -83,14 +83,13 @@ end
 -- What a key does in the current mode and layout: role name or nil.
 local function roleFor(k)
   local m = mode()
-  if k == S.keys then return nil end -- Mode key: the device owns it
-  if k == 1 then return "talk" end
-  if k == 2 then return "clear" end
-  if k == 3 then return m.pad4 end
+  if S.keys >= 9 and k == S.keys then return nil end -- Mode key: the device owns it
+  if k == TALK_KEY then return "talk" end
   if S.keys >= 9 then
     if k == KNOB_KEY then return "knobmode" end
     return (m.pad9 or {})[k]
   end
+  return (m.pad4 or {})[k]
 end
 
 local function labelFor(role)

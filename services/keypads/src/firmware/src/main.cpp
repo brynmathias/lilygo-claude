@@ -168,8 +168,10 @@ void invalidateAll() {
   for (size_t k = 0; k <= MAX_KEYS; k++) drawnValid[k] = false;
 }
 
-// The Mode key is always the last key: 9 with the expansion, 4 without.
-size_t modeKey() { return keyCount; }
+// The Mode key is the last key with the expansion (9). The main unit alone
+// has no Mode key: all 4 keys go to the Mac, which picks modes from its
+// menu bar. Returns 0 (no key) then.
+size_t modeKey() { return keyCount >= 9 ? keyCount : 0; }
 size_t pickerSlots() { return keyCount > 1 ? keyCount - 1 : 0; }
 size_t pickerPages() {
   size_t s = pickerSlots();
@@ -213,7 +215,7 @@ void enterStandalone() {
 Label desiredLabel(size_t k) {
   Label l;
   if (!host) {
-    if (k == modeKey()) {
+    if (k == keyCount) {
       strcpy(l.text, "No Mac");
       l.rgb = 0x303030;
     }

@@ -53,9 +53,10 @@ end
 -- `short` and `labels` are ASCII-only names for keys with screens (the
 -- fallback if an emoji face can't be sent). `icon` is the mode's emoji;
 -- `icons` gives each role's emoji (missing roles use M.ROLE_ICONS).
--- `pad4` puts a role on the LilyGO's key 3; `pad9` puts roles on keys 4–7
--- when the expansion is attached. Talk (1), Clear (2), knob mode (8) and
--- Mode (last key) are the same in every mode.
+-- `pad4` maps the LilyGO's keys 2–4 to roles (main unit alone: no Mode
+-- key, modes come from the menu bar); `pad9` maps keys 2–7 when the
+-- expansion is attached. Talk (1), knob mode (8) and Mode (9) are the same
+-- in every mode.
 M.MODES = {
   {
     name = "claude", label = "🤖 CLAUDE", short = "Claude", color = { red = 0.85, green = 0.47, blue = 0.34 },
@@ -66,9 +67,11 @@ M.MODES = {
     -- Hop between Claude sessions in iTerm tabs without leaving the mode.
     tabprev = tap({ "cmd", "shift" }, "["), tabnext = tap({ "cmd", "shift" }, "]"),
     keys = { [2] = "Enter", [3] = "Esc", [5] = "Pane" },
-    labels = { yes = "Enter", no = "Esc", a = "Pane", tabprev = "< Tab", tabnext = "Tab >" },
-    icon = "🤖", icons = { yes = "✅", no = "✋", a = "🪟", tabprev = "⬅️", tabnext = "➡️" },
-    pad4 = "no", pad9 = { [4] = "yes", [5] = "a", [6] = "tabprev", [7] = "tabnext" },
+    labels = { yes = "Enter", no = "Stop", a = "Pane", tabprev = "< Tab", tabnext = "Tab >" },
+    icon = "🤖", icons = { yes = "✅", no = "🛑", a = "🪟", tabprev = "⬅️", tabnext = "➡️" },
+    -- Voice, Tab <, Tab >, Enter, Pane, Clear, Stop, knob mode, Mode.
+    pad4 = { [2] = "tabprev", [3] = "tabnext", [4] = "yes" },
+    pad9 = { [2] = "tabprev", [3] = "tabnext", [4] = "yes", [5] = "a", [6] = "clear", [7] = "no" },
   },
   {
     name = "iterm", label = "🖥️ ITERM", short = "iTerm", color = { red = 0.45, green = 0.45, blue = 0.5 },
@@ -79,7 +82,7 @@ M.MODES = {
     keys = { [2] = "◀Tab", [3] = "Tab▶", [5] = "Pane" },
     labels = { yes = "< Tab", no = "Tab >", a = "Pane" },
     icon = "🖥️", icons = { yes = "⬅️", no = "➡️", a = "🪟" },
-    pad4 = "a", pad9 = { [4] = "yes", [5] = "no" },
+    pad4 = { [2] = "clear", [3] = "a" }, pad9 = { [2] = "clear", [3] = "a", [4] = "yes", [5] = "no" },
   },
   {
     name = "browser", label = "🌐 BROWSER", short = "Browser", color = { red = 0.25, green = 0.5, blue = 0.9 },
@@ -91,7 +94,7 @@ M.MODES = {
     keys = { [2] = "◀Tab", [3] = "Tab▶", [4] = "Close", [5] = "Back" },
     labels = { yes = "< Tab", no = "Tab >", a = "Back", clear = "Close Tab" },
     icon = "🌐", icons = { yes = "◀️", no = "▶️", a = "🔙", clear = "❌" },
-    pad4 = "a", pad9 = { [4] = "yes", [5] = "no" },
+    pad4 = { [2] = "clear", [3] = "a" }, pad9 = { [2] = "clear", [3] = "a", [4] = "yes", [5] = "no" },
   },
   {
     name = "meet", label = "📹 MEET", short = "Meet", color = { red = 0.1, green = 0.6, blue = 0.3 },
@@ -105,7 +108,7 @@ M.MODES = {
     keys = { [1] = "Mic", [2] = "Hand", [3] = "Cam", [5] = "Captions" },
     labels = { talk = "Mic / Talk", yes = "Hand", no = "Camera", a = "Captions" },
     icon = "📹", icons = { talk = "🎤", yes = "✋", no = "📷", a = "💬" },
-    pad4 = "no", pad9 = { [4] = "yes", [5] = "a" },
+    pad4 = { [2] = "clear", [3] = "no" }, pad9 = { [2] = "clear", [3] = "no", [4] = "yes", [5] = "a" },
   },
   {
     name = "apps", label = "🧪 APPS", short = "Apps", color = { red = 0.3, green = 0.7, blue = 0.4 },
@@ -115,7 +118,7 @@ M.MODES = {
     keys = { [2] = "Enter", [3] = "Esc", [5] = "Tab" },
     labels = { yes = "Enter", no = "Esc", a = "Tab" },
     icon = "🧪", icons = { yes = "✅", no = "✋", a = "➡️" },
-    pad4 = "no", pad9 = { [4] = "yes", [5] = "a" },
+    pad4 = { [2] = "clear", [3] = "no" }, pad9 = { [2] = "clear", [3] = "no", [4] = "yes", [5] = "a" },
   },
 }
 

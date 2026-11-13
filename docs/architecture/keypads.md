@@ -464,8 +464,8 @@ Spike tooling kept: `spike/` (calibration mode: key = pick a screen, knob
   USB start-of-frame counter: if the bus disappears (no frames for 1 s),
   comes back, and no `HELLO 1` arrives within 15 s, it releases D+ for
   200 ms and reboots, which the Mac sees as a replug. At most once per bus
-  outage; a pad on a bus that never drops never reboots. Not yet verified
-  by a real Mac restart.
+  outage; a pad on a bus that never drops never reboots. Verified 2026-11-13
+  by unplugging the hub from the Mac and plugging it back in.
 - `hs.serial` needs the port to appear as `/dev/cu.usbmodem*`. Verified:
   it does (`/dev/cu.usbmodem13401`), through the KVM.
 

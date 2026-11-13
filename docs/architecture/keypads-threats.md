@@ -141,3 +141,12 @@ The path input is sound. `validFaceName` (1–16 characters of `[a-z0-9_-]`) run
 ### Delta v1.4 (flash) conditions
 
 1. If any image buffer fails to allocate, disable image commands (`ERR IMG nomem`) and keep text labels. Never dereference a null buffer.
+
+### Delta v1.5 note (lights, brightness, idle)
+
+**Date**: 2026-11-12. Posture unchanged. Self-assessed delta (no new trust boundary); not a security-analyst review.
+
+- **New Mac → device commands** `LIGHT`, `BACKLIGHT`, `DIM`. Parsed in `lib/protocol` with fixed field counts, at most 5 digits per number, range checks against named maxima, and no trailing data (native tests cover the rejects). They change only LED and backlight registers; none produces HID, so the "no serial command produces keystrokes" invariant holds.
+- **New Mac-side subprocess:** the "All Screens" knob mode runs BetterDisplay's CLI via `hs.task` with a fixed path and fixed arguments (only a computed integer percentage varies). No shell, no user-supplied strings.
+- **Idle detection** reads `hs.host.idleTime()` and lock/sleep events locally; nothing leaves the machine.
+- **USB self-recovery** (`watchUsb` in `main.cpp`): the device may detach from USB and reboot. The trigger is bus state alone (start-of-frame counter stopped for 1 s, resumed, then 15 s without a `HELLO 1`). No serial command can cause it. Worst case it reboots once per bus outage (about 2 s without the pad).

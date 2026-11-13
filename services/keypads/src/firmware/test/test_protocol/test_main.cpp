@@ -239,6 +239,70 @@ void test_unpack_full_face_worst_case_fits_cap() {
   TEST_ASSERT_TRUE(unpackFace(in, n, out, FACE_PIXELS));
 }
 
+void test_light_valid() {
+  Command c;
+  TEST_ASSERT_TRUE(parse("LIGHT 2 60 25 80 1500", c));
+  TEST_ASSERT_EQUAL(Cmd::Light, c.type);
+  TEST_ASSERT_EQUAL(2, c.lightMode);
+  TEST_ASSERT_EQUAL(60, c.lightBrightness);
+  TEST_ASSERT_EQUAL(25, c.lightHue);
+  TEST_ASSERT_EQUAL(80, c.lightSaturation);
+  TEST_ASSERT_EQUAL(1500, c.lightPulseMs);
+  TEST_ASSERT_TRUE(parse("LIGHT 4 100 360 100 9999", c));
+  TEST_ASSERT_TRUE(parse("LIGHT 0 0 0 0 0", c));
+}
+
+void test_light_rejects_bad() {
+  Command c;
+  const char *bad[] = {
+      "LIGHT 5 60 25 80 0",    // mode out of range
+      "LIGHT 2 101 25 80 0",   // brightness
+      "LIGHT 2 60 361 80 0",   // hue
+      "LIGHT 2 60 25 101 0",   // saturation
+      "LIGHT 2 60 25 80 10000", // pulse
+      "LIGHT 2 60 25 80",      // too few
+      "LIGHT 2 60 25 80 0 1",  // too many
+      "LIGHT 2 60 25 80 0 ",   // trailing space
+      "LIGHT 2  60 25 80 0",   // double space
+      "LIGHT 2 6x 25 80 0",    // not a number
+      "LIGHT 2 60 25 80 -1",
+      "LIGHT 2 60 25 80 123456",   // more than 5 digits
+      "LIGHT ",
+  };
+  for (const char *b : bad) {
+    TEST_ASSERT_FALSE_MESSAGE(parse(b, c), b);
+    TEST_ASSERT_EQUAL(Cmd::None, c.type);
+  }
+}
+
+void test_dim() {
+  Command c;
+  TEST_ASSERT_TRUE(parse("DIM 1", c));
+  TEST_ASSERT_EQUAL(Cmd::Dim, c.type);
+  TEST_ASSERT_TRUE(c.dim);
+  TEST_ASSERT_TRUE(parse("DIM 0", c));
+  TEST_ASSERT_FALSE(c.dim);
+  const char *bad[] = {"DIM", "DIM ", "DIM 2", "DIM 10", "DIM 1 ", "DIMM 1"};
+  for (const char *b : bad) {
+    TEST_ASSERT_FALSE_MESSAGE(parse(b, c), b);
+    TEST_ASSERT_EQUAL(Cmd::None, c.type);
+  }
+}
+
+void test_backlight() {
+  Command c;
+  TEST_ASSERT_TRUE(parse("BACKLIGHT 40", c));
+  TEST_ASSERT_EQUAL(Cmd::Backlight, c.type);
+  TEST_ASSERT_EQUAL(40, c.backlight);
+  TEST_ASSERT_TRUE(parse("BACKLIGHT 100", c));
+  TEST_ASSERT_TRUE(parse("BACKLIGHT 0", c));
+  const char *bad[] = {"BACKLIGHT", "BACKLIGHT ", "BACKLIGHT 101", "BACKLIGHT 4 ", "BACKLIGHT x", "BACKLIGHT 1 2"};
+  for (const char *b : bad) {
+    TEST_ASSERT_FALSE_MESSAGE(parse(b, c), b);
+    TEST_ASSERT_EQUAL(Cmd::None, c.type);
+  }
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_hello_and_ping);
@@ -260,5 +324,9 @@ int main() {
   RUN_TEST(test_unpack_rejects_wrong_counts);
   RUN_TEST(test_unpack_never_writes_past_end);
   RUN_TEST(test_unpack_full_face_worst_case_fits_cap);
+  RUN_TEST(test_light_valid);
+  RUN_TEST(test_light_rejects_bad);
+  RUN_TEST(test_dim);
+  RUN_TEST(test_backlight);
   return UNITY_END();
 }

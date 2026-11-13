@@ -47,7 +47,10 @@ local S = {
 }
 
 local function mode() return modes.MODES[S.mode] end
-local function knob() return modes.KNOB_MODES[S.knob] end
+-- The knob's modes: the shared ones, plus "light" (LilyGO only, added below).
+local KNOBS = {}
+for _, k in ipairs(modes.KNOB_MODES) do KNOBS[#KNOBS + 1] = k end
+local function knob() return KNOBS[S.knob] end
 
 local function hex(c)
   return string.format("%02X%02X%02X", math.floor(c.red * 255), math.floor(c.green * 255), math.floor(c.blue * 255))
@@ -100,7 +103,7 @@ local function labelFor(role)
   elseif role == "clear" then
     return labels.clear or "Clear"
   elseif role == "knobmode" then
-    return knob().text -- shown as text, not an emoji
+    return knob().label and knob().label() or knob().text -- text, not an emoji
   end
   return labels[role] or role
 end
@@ -157,8 +160,108 @@ local function pushLabel(k)
   end
 end
 
+-- Key lights: the controllers' own flowing-colour effect (effect 2, as in
+-- LilyGO's demo). Colour mode (2) works on the main unit only so far: the
+-- expansion keeps its start-up colour. keypads.lilygo.light(...) overrides
+-- this until the next mode change.
+-- Light patterns, chosen with the knob's "Pattern" mode (saved). Colour
+-- mode (LIGHT 2) is left out: the expansion ignores colour changes.
+local PATTERNS = {
+  { mode = 4, name = "Flow" },   -- LilyGO demo's flowing colours
+  { mode = 3, name = "Flash" },  -- controller effect 1
+  { mode = 0, name = "Off" },
+}
+local SETTINGS_PATTERN = "keypads.lilygo.pattern"
+S.pattern = math.tointeger(hs.settings.get(SETTINGS_PATTERN)) or 1
+if not PATTERNS[S.pattern] then S.pattern = 1 end
+-- Pad brightness level 1–10, set with the knob's "Light" mode: screens at
+-- level × 10 %, key lights at level × 3 (of 100).
+local SETTINGS_LEVEL = "keypads.lilygo.level"
+local LEVEL_DEFAULT, LEVEL_MAX = 5, 10
+local LEVEL_SCREEN, LEVEL_LIGHT = 10, 3
+S.level = math.tointeger(hs.settings.get(SETTINGS_LEVEL)) or LEVEL_DEFAULT
+if S.level < 1 or S.level > LEVEL_MAX then S.level = LEVEL_DEFAULT end
+
+local function hueSat(c)
+  local r, g, b = c.red, c.green, c.blue
+  local max, min = math.max(r, g, b), math.min(r, g, b)
+  local d = max - min
+  if d == 0 then return 0, 0 end
+  local h
+  if max == r then h = ((g - b) / d) % 6
+  elseif max == g then h = (b - r) / d + 2
+  else h = (r - g) / d + 4 end
+  return math.floor(h * 60 + 0.5) % 360, math.floor(d / max * 100 + 0.5)
+end
+
+local function sendLight()
+  local h, sat = hueSat(mode().color)
+  send(string.format("LIGHT %d %d %d %d %d", PATTERNS[S.pattern].mode, S.level * LEVEL_LIGHT, h, sat, 0))
+  send("BACKLIGHT " .. S.level * LEVEL_SCREEN)
+end
+
+local function setLevel(step)
+  local level = math.max(1, math.min(LEVEL_MAX, S.level + step))
+  if level == S.level then return end
+  S.level = level
+  hs.settings.set(SETTINGS_LEVEL, level)
+  sendLight()
+  pushLabel(KNOB_KEY)
+end
+
+KNOBS[#KNOBS + 1] = {
+  name = "light", icon = "💡", text = "Light",
+  label = function() return "Light " .. S.level end,
+  ccw = function() setLevel(-1) end, cw = function() setLevel(1) end,
+}
+
+local function stepPattern(step)
+  S.pattern = (S.pattern - 1 + step) % #PATTERNS + 1
+  hs.settings.set(SETTINGS_PATTERN, S.pattern)
+  sendLight()
+  pushLabel(KNOB_KEY)
+end
+
+KNOBS[#KNOBS + 1] = {
+  name = "pattern", icon = "🌈", text = "Pattern",
+  label = function() return PATTERNS[S.pattern].name end,
+  ccw = function() stepPattern(-1) end, cw = function() stepPattern(1) end,
+}
+
+-- "All screens": every Mac display and the pad together. Uses BetterDisplay's
+-- command line (Settings > Integration must allow it), since the brightness
+-- key only changes the focused display. Clicks are coalesced: one
+-- BetterDisplay call runs at a time with the steps that piled up meanwhile.
+local BETTERDISPLAY = "/Applications/BetterDisplay.app/Contents/MacOS/BetterDisplay"
+local DISPLAY_STEP_PERCENT = 10
+S.displaySteps, S.displayTask = 0, nil
+
+local function runDisplaySteps()
+  if S.displayTask or S.displaySteps == 0 then return end
+  local pct = S.displaySteps * DISPLAY_STEP_PERCENT
+  S.displaySteps = 0
+  S.displayTask = hs.task.new(BETTERDISPLAY, function(code, _, err)
+    S.displayTask = nil
+    if code ~= 0 then log.w("BetterDisplay brightness failed: " .. tostring(err)) end
+    runDisplaySteps()
+  end, { "set", "-type=Display", string.format("-brightness=%d%%", pct), "-offset" })
+  S.displayTask:start()
+end
+
+local function allScreens(step)
+  S.displaySteps = S.displaySteps + step
+  runDisplaySteps()
+  setLevel(step)
+end
+
+KNOBS[#KNOBS + 1] = {
+  name = "all", icon = "🔆", text = "All Screens",
+  ccw = function() allScreens(-1) end, cw = function() allScreens(1) end,
+}
+
 local function pushAll()
   if not S.host then return end
+  sendLight()
   local names = {}
   for _, m in ipairs(modes.MODES) do names[#names + 1] = m.short end
   send("MODES " .. table.concat(names, ","))
@@ -248,6 +351,35 @@ local function talkUp()
   end
 end
 
+-- Idle dimming -------------------------------------------------------------
+-- Dims the pad's screens and lights while the Mac is idle (no input for
+-- IDLE_SECONDS, from the keyboard, mouse or this pad) or locked/asleep.
+-- Wakes within a tick (PING_SECONDS) of any input.
+local IDLE_SECONDS = 300
+S.lastPadUse = hs.timer.secondsSinceEpoch()
+S.locked, S.screensOff, S.dimSent = false, false, nil
+
+local function updateDim()
+  if not S.host then return end
+  local now = hs.timer.secondsSinceEpoch()
+  local idle = S.locked or S.screensOff
+    or (hs.host.idleTime() > IDLE_SECONDS and now - S.lastPadUse > IDLE_SECONDS)
+  if idle ~= S.dimSent then
+    send("DIM " .. (idle and "1" or "0"))
+    S.dimSent = idle
+  end
+end
+
+local W = hs.caffeinate.watcher
+S.sleepWatcher = W.new(function(ev)
+  if ev == W.screensDidLock then S.locked = true
+  elseif ev == W.screensDidUnlock then S.locked = false
+  elseif ev == W.screensDidSleep or ev == W.screensaverDidStart then S.screensOff = true
+  elseif ev == W.screensDidWake or ev == W.screensaverDidStop then S.screensOff = false
+  else return end
+  updateDim()
+end):start()
+
 -- Device events ------------------------------------------------------------
 
 local function keyDown(k)
@@ -255,7 +387,7 @@ local function keyDown(k)
   if role == "talk" then return talkDown() end
   if role == "clear" then return (mode().clear or modes.clearText)() end
   if role == "knobmode" then
-    S.knob = S.knob % #modes.KNOB_MODES + 1
+    S.knob = S.knob % #KNOBS + 1
     hs.settings.set(SETTINGS_KNOB, knob().name)
     updateMenu()
     return pushLabel(KNOB_KEY)
@@ -297,16 +429,23 @@ local function onLine(line)
     S.host = true
     resetFaces()
     send("HELLO 1")
+    S.dimSent = nil -- the device starts undimmed; tell it the current state
     pushAll()
+    updateDim()
     updateMenu()
     log.i("handshake ok, " .. S.keys .. " keys")
     return
   end
   if not S.host then return end -- nothing else counts before the banner
+  if line:match("^KEY ") or line:match("^KNOB ") then
+    S.lastPadUse = hs.timer.secondsSinceEpoch()
+    updateDim()
+  end
   local k, dir = line:match("^KEY (%d) ([DU])$")
   if k then
     k = tonumber(k)
-    if k < 1 or k >= S.keys then return end -- the Mode key is never sent
+    if k < 1 or k > S.keys then return end
+    if S.keys >= 9 and k == S.keys then return end -- the Mode key is never sent
     if dir == "D" then keyDown(k) else keyUp(k) end
     return
   end
@@ -419,6 +558,7 @@ local function tick()
       lostDevice("no reply for " .. LIVENESS_SECONDS .. " s")
     else
       send("PING")
+      updateDim()
     end
   end
 end
@@ -427,7 +567,7 @@ end
 local savedMode = hs.settings.get(SETTINGS_MODE)
 S.mode = modes.findMode("name", savedMode) or 1
 local savedKnob = hs.settings.get(SETTINGS_KNOB)
-for i, k in ipairs(modes.KNOB_MODES) do
+for i, k in ipairs(KNOBS) do
   if k.name == savedKnob then S.knob = i end
 end
 
@@ -440,7 +580,7 @@ S.usbWatcher = hs.usb.watcher.new(function(ev)
     hs.timer.doAfter(1, tryPorts)
   end
 end):start()
-tryPorts()
+hs.timer.doAfter(0.5, tryPorts) -- deferred, so a reload via `hs -c` returns first
 
 -- Free the port so `pio run -t upload` can flash, then take it back.
 function S.pause()
@@ -449,11 +589,22 @@ function S.pause()
   return "paused: serial port released"
 end
 
+-- Deferred: opening the port inside an `hs -c` call left hs.ipc
+-- "already recursing" and Hammerspoon unresponsive to the CLI.
 function S.resume()
   S.paused = false
   S.tried = {}
-  tryPorts()
-  return "resumed"
+  hs.timer.doAfter(0.1, tryPorts)
+  return "resuming"
+end
+
+-- Try the lights by hand: mode 0 off, 1 normal, 2 colour, 3/4 the
+-- controller's own effects; brightness 0-100, hue 0-360, saturation 0-100,
+-- pulse period in ms (0 = steady).
+function S.light(lmode, brightness, hue, sat, pulseMs)
+  local line = string.format("LIGHT %d %d %d %d %d", lmode, brightness or 30, hue or 0, sat or 100, pulseMs or 0)
+  send(line)
+  return line
 end
 
 function S.recent() return table.concat(S.rxLog, "\n") end

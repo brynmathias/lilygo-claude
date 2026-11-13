@@ -44,6 +44,41 @@ bool parseLabel(const char *p, size_t len, Command &out) {
   return true;
 }
 
+// Reads a decimal number (1..5 digits, <= max) at p[i], then expects a space
+// or the end of input. Advances i past the space.
+bool readNum(const char *p, size_t len, size_t &i, uint32_t max, uint32_t &v) {
+  size_t digits = 0;
+  v = 0;
+  while (i < len && p[i] >= '0' && p[i] <= '9') {
+    if (++digits > 5) return false;
+    v = v * 10 + (uint32_t)(p[i++] - '0');
+  }
+  if (digits == 0 || v > max) return false;
+  if (i < len) {
+    if (p[i] != ' ') return false;
+    i++;
+    if (i == len) return false; // trailing space
+  }
+  return true;
+}
+
+bool parseLight(const char *p, size_t len, Command &out) {
+  // "<mode> <brightness> <hue> <saturation> <pulse ms>"
+  size_t i = 0;
+  uint32_t mode, bright, hue, sat, pulse;
+  if (!readNum(p, len, i, LIGHT_MAX_MODE, mode) || i == len) return false;
+  if (!readNum(p, len, i, LIGHT_MAX_BRIGHTNESS, bright) || i == len) return false;
+  if (!readNum(p, len, i, LIGHT_MAX_HUE, hue) || i == len) return false;
+  if (!readNum(p, len, i, LIGHT_MAX_SATURATION, sat) || i == len) return false;
+  if (!readNum(p, len, i, LIGHT_MAX_PULSE_MS, pulse) || i != len) return false;
+  out.lightMode = (uint8_t)mode;
+  out.lightBrightness = (uint8_t)bright;
+  out.lightHue = (uint16_t)hue;
+  out.lightSaturation = (uint8_t)sat;
+  out.lightPulseMs = (uint16_t)pulse;
+  return true;
+}
+
 bool parseModes(const char *p, size_t len, Command &out) {
   // "a,b,c" : 1..MAX_MODES names of 1..MAX_MODE_NAME printable chars
   uint8_t count = 0;
@@ -183,6 +218,30 @@ bool parseLine(const char *line, size_t len, Command &out) {
       return false;
     }
     out.type = Cmd::Face;
+    return true;
+  }
+  if (len == 5 && memcmp(line, "DIM ", 4) == 0 && (line[4] == '0' || line[4] == '1')) {
+    out.type = Cmd::Dim;
+    out.dim = line[4] == '1';
+    return true;
+  }
+  if (startsWith(line, len, "BACKLIGHT ", r)) {
+    size_t i = r;
+    uint32_t v;
+    if (!readNum(line, len, i, 100, v) || i != len) {
+      out = Command();
+      return false;
+    }
+    out.type = Cmd::Backlight;
+    out.backlight = (uint8_t)v;
+    return true;
+  }
+  if (startsWith(line, len, "LIGHT ", r)) {
+    if (!parseLight(line + r, len - r, out)) {
+      out = Command();
+      return false;
+    }
+    out.type = Cmd::Light;
     return true;
   }
   if (startsWith(line, len, "MODES ", r)) {

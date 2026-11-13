@@ -19,7 +19,15 @@ constexpr size_t MAX_IMG_BYTES = FACE_PIXELS * 2 + (FACE_PIXELS + 127) / 128; //
 
 constexpr size_t MAX_FACE_NAME = 16; // [a-z0-9_-], also the file name in flash
 
-enum class Cmd { None, Hello, Ping, Modes, Label, ImgBegin, ImgData, Face };
+enum class Cmd { None, Hello, Ping, Modes, Label, ImgBegin, ImgData, Face, Light, Dim, Backlight };
+
+// LIGHT: the key lights (the units' LED controllers).
+constexpr uint8_t LIGHT_OFF = 0, LIGHT_NORMAL = 1, LIGHT_COLOUR = 2, LIGHT_EFFECT_1 = 3,
+                  LIGHT_EFFECT_2 = 4, LIGHT_MAX_MODE = 4;
+constexpr uint8_t LIGHT_MAX_BRIGHTNESS = 100;
+constexpr uint16_t LIGHT_MAX_HUE = 360;
+constexpr uint8_t LIGHT_MAX_SATURATION = 100;
+constexpr uint16_t LIGHT_MAX_PULSE_MS = 9999;
 
 struct Command {
   Cmd type = Cmd::None;
@@ -40,6 +48,14 @@ struct Command {
   // ImgData
   uint8_t data[MAX_IMD_BYTES] = {0};
   uint8_t dataLen = 0;
+  // Light: "LIGHT <mode> <brightness> <hue> <saturation> <pulse ms>".
+  // pulse 0 = steady; otherwise brightness breathes with that period.
+  uint8_t lightMode = 0, lightBrightness = 0, lightSaturation = 0;
+  uint16_t lightHue = 0, lightPulseMs = 0;
+  // Dim: "DIM 1" dims screens and lights (Mac idle or locked), "DIM 0" undims.
+  bool dim = false;
+  // Backlight: "BACKLIGHT <0-100>", screen brightness in percent.
+  uint8_t backlight = 0;
 };
 
 // Parses one complete line (no '\n'). Returns false, and leaves `out.type`

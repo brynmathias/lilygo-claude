@@ -1,6 +1,6 @@
 # keypads
 
-**v1.4** — 2026-11-11
+**v1.5** — 2026-11-12
 
 One tool for two macro pads:
 
@@ -155,6 +155,9 @@ has read `HELLO keypads 1` from it.
 | dev → Mac | `MISSING <name>` | No saved face by that name: the Mac uploads it |
 | Mac → dev | `IMG @<name> <bytes>` then `IMD <base64>` lines (≤96 chars) | Upload a face (packed, ≤32,896 bytes) |
 | dev → Mac | `SAVED <name>` / `ERR …` | Upload stored in flash, or why not |
+| Mac → dev | `LIGHT <mode 0-4> <brightness 0-100> <hue 0-360> <saturation 0-100> <pulse ms 0-9999>` | Key lights: 0 off, 1 normal, 2 colour (optionally breathing), 3/4 the controllers' own effects. The Mac uses 4 (LilyGO demo's flowing colours) |
+| Mac → dev | `BACKLIGHT <0-100>` | Screen brightness, percent |
+| Mac → dev | `DIM <0/1>` | Dim screens and lights (Mac idle 5 min, locked, or screens asleep) / undim |
 
 Any valid line from the Mac counts as "alive" for the 3 s timeout (a
 `PING` can wait behind an upload). Device output never blocks for more
@@ -265,13 +268,29 @@ reordered 2026-11-12 (owner's request).
 | 5 | | 🪟 next pane | ➡️ tab | ▶️ tab | 💬 captions | ➡️ Tab |
 | 6 | | 🧹 Clear | | | | |
 | 7 | | 🛑 Stop (Esc) | | | | |
-| 8 | knob mode as text: Scroll / Volume / Brightness | | | | | |
+| 8 | knob mode as text: Scroll / Volume / Brightness / Light n / All Screens | | | | | |
 | 9 | Mode (emoji of the current mode) | | | | | |
 
 Without the expansion there is no Mode key; modes are picked from the
 menu bar. Claude: 🎤 Talk, ⬅️ prev tab, ➡️ next tab, ✅ Enter. Other
 modes: keys 1–3 as above, key 4 blank. The knob turns by its knob mode
 (Scroll = the mode's up/down) and its press is select.
+
+### Lights, brightness and idle (v1.5)
+
+- **Key lights** run the controllers' effect 2 by default (the flowing
+  colours from LilyGO's demo), on both units.
+- **Knob mode "Light"** (LilyGO only) sets a pad level 1–10, saved in
+  `hs.settings`: screens at level × 10 %, lights at level × 3.
+- **Knob mode "All Screens"** moves every Mac display (through
+  BetterDisplay's command line, `set -type=Display -brightness=±10% -offset`)
+  and the pad level together. The macOS brightness key only changes the
+  focused display. BetterDisplay can't set brightness on a display group.
+- **Idle:** the Mac sends `DIM 1` when idle (no keyboard, mouse or pad input
+  for 5 min), locked, or its screens sleep, and `DIM 0` on the next input
+  (checked every second). The device also dims itself after 60 s without
+  a Mac and without a key press (e.g. the Mac is asleep). Dimmed: screens
+  8 %, lights 3.
 
 ## Spike results (2026-11-11)
 
@@ -428,6 +447,25 @@ Spike tooling kept: `spike/` (calibration mode: key = pick a screen, knob
   are rendered.
 - Each pad keeps its own Talk state, so releasing Talk on one pad does
   not stop a recording started from the other.
+- **Colour mode on the expansion.** Our expansion's controller runs
+  firmware v1 (register `0x10`; the main unit has v2). v1 can't set hue:
+  it is OR-ed into the old value (LilyGO issue #7). Brightness,
+  saturation and effect modes work. Fix: flash LilyGO's
+  `STM32G030F6P6_Drive_0x02 … V2` hex over SWD (ST-Link; the socket is
+  inside the case). Until then, solid colours work on the main unit only,
+  which blocks "pulse the colour of a waiting terminal" on the expansion.
+- **Hammerspoon hangs (fixed v1.5).** Opening the serial port inside an
+  `hs -c` call (resume, or load during a reload) left `hs.ipc`
+  "already recursing". Both are now deferred with `hs.timer.doAfter`.
+- **Stuck USB after a Mac restart (fixed v1.5).** Behind a powered hub
+  (the KVM) the pad stays on while the Mac restarts, and the ESP32-S3's
+  built-in USB serial then sent and received nothing; even esptool
+  couldn't connect. Only a replug fixed it. The firmware now watches the
+  USB start-of-frame counter: if the bus disappears (no frames for 1 s),
+  comes back, and no `HELLO 1` arrives within 15 s, it releases D+ for
+  200 ms and reboots, which the Mac sees as a replug. At most once per bus
+  outage; a pad on a bus that never drops never reboots. Not yet verified
+  by a real Mac restart.
 - `hs.serial` needs the port to appear as `/dev/cu.usbmodem*`. Verified:
   it does (`/dev/cu.usbmodem13401`), through the KVM.
 
@@ -436,6 +474,14 @@ Spike tooling kept: `spike/` (calibration mode: key = pick a screen, knob
 **Verdict**: SKIPPED — posture: explore (experiment, synthetic data, local only); the security design pass ran at D2 instead.
 
 ## Version history
+
+- **v1.5** (2026-11-12): Claude mode reordered (Voice, Tab <, Tab >,
+  Enter, Pane, Clear, Stop, knob mode, Mode); main unit alone has no Mode
+  key (menu bar picks modes). Key lights, screen brightness, idle dimming,
+  knob modes Light and All Screens. Protocol: `LIGHT`, `BACKLIGHT`, `DIM`.
+  Incorrect assumptions corrected: assumed both units run the same
+  controller firmware (main v2, expansion v1, which can't set hue);
+  assumed the brightness key changes every display.
 
 - **v1.4** (2026-11-11): key faces (emoji/text images uploaded once and
   kept in flash), Talk on key 1 and Mode on the last key, Claude mode

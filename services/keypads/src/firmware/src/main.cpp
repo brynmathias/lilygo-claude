@@ -14,6 +14,7 @@
 #include <Preferences.h>
 #include <Wire.h>
 #include <math.h>
+#include <soc/usb_serial_jtag_struct.h>
 
 #include "calibration.h"
 #include "protocol.h"
@@ -26,6 +27,18 @@ constexpr int PIN_LCD_BL = 1; // active-low
 constexpr int PIN_KNOB_A = 4, PIN_KNOB_B = 5, PIN_KNOB_KEY = 0;
 
 constexpr uint8_t REG_LCD_CS = 0x01, REG_KEY_TRIGGER = 0x02;
+// Key lights (vendor T-Keyboard-S3-Pro_Drive.h). CONTROL_1 bits 0-5 and
+// CONTROL_2 bits 0-7 select LEDs; CONTROL_1 0x80 clears the selection and
+// 0x40 shows the colour on the selected LEDs.
+constexpr uint8_t REG_LED_MODE = 0x03, REG_LED_BRIGHTNESS = 0x04, REG_LED_HUE_H = 0x05,
+                  REG_LED_HUE_L = 0x06, REG_LED_SATURATION = 0x07, REG_LED_CONTROL_1 = 0x08,
+                  REG_LED_CONTROL_2 = 0x09, REG_FIRMWARE_VERSION = 0x10;
+constexpr uint8_t LED_CTRL_CLEAR = 0x80, LED_CTRL_SHOW = 0x40, LED_SELECT_1 = 0x3F,
+                  LED_SELECT_2 = 0xFF;
+// The STM32's own LED modes (register 0x03).
+constexpr uint8_t LED_MODE_NORMAL = 1, LED_MODE_FREE = 2, LED_MODE_TEST_1 = 3,
+                  LED_MODE_TEST_2 = 4;
+constexpr uint32_t LIGHT_STEP_MS = 40; // pulse update rate (25 Hz)
 constexpr uint8_t MAIN_UNIT = 0x01;
 constexpr uint8_t SLOT_BITS[5] = {0b10000, 0b01000, 0b00100, 0b00010, 0b00001};
 constexpr uint32_t CS_SETTLE_MS = 20, KEY_READ_WAIT_MS = 20, SPI_HZ = 4500000;
@@ -37,6 +50,15 @@ constexpr uint32_t HELLO_EVERY_MS = 2000;   // banner while waiting for a Mac
 constexpr uint32_t HOST_TIMEOUT_MS = 3000;  // no PING for this long: standalone
 constexpr uint32_t PICKER_TIMEOUT_MS = 5000;
 constexpr uint32_t UNIT_SCAN_EVERY_MS = 1000;
+// USB self-recovery. Behind a powered hub the pad stays on through a Mac
+// restart, and the chip's USB serial often stays stuck afterwards (no data
+// either way; only a replug fixed it). The bus is "gone" after this long with
+// no USB start-of-frame (the host sends one every 1 ms while awake)...
+constexpr uint32_t USB_GONE_MS = 1000;
+// ...and if no Mac says HELLO this long after it comes back, drop off the bus
+// and reboot once, which the Mac sees as a replug.
+constexpr uint32_t USB_RECOVER_MS = 15000;
+constexpr uint32_t USB_DETACH_MS = 200; // D+ released long enough for the host to notice
 
 class TunableST7735 : public Arduino_ST7735 {
 public:
@@ -81,6 +103,15 @@ bool writeReg(uint8_t addr, uint8_t reg, uint8_t value) {
   return ok;
 }
 
+// LED writes leave the controller a gap, as the vendor demos do. Unit
+// controllers with firmware v1 (REG_FIRMWARE_VERSION; our expansion) can't
+// set hue: it is OR-ed into the old value (LilyGO issue #7, fixed in v2).
+constexpr uint32_t LED_WRITE_GAP_US = 2000;
+void ledWrite(uint8_t addr, uint8_t reg, uint8_t value) {
+  writeReg(addr, reg, value);
+  delayMicroseconds(LED_WRITE_GAP_US);
+}
+
 bool readReg(uint8_t addr, uint8_t reg, uint8_t *out) {
   Wire.beginTransmission(addr);
   Wire.write(reg);
@@ -94,6 +125,13 @@ bool readReg(uint8_t addr, uint8_t reg, uint8_t *out) {
 // ---------------------------------------------------------------- state
 bool host = false;
 uint32_t lastPingMs = 0, lastHelloMs = 0;
+// Dimming: the Mac asks (DIM 1 when idle or locked), or no Mac and no key
+// press for STANDALONE_DIM_MS (e.g. the Mac is asleep).
+constexpr uint32_t STANDALONE_DIM_MS = 60000;
+constexpr uint8_t DIM_BACKLIGHT_PERCENT = 8, DIM_LIGHT_BRIGHTNESS = 3;
+bool macDim = false, aloneDim = false, dimShown = false;
+uint8_t backlightPercent = 100; // set by the Mac (BACKLIGHT)
+uint32_t standaloneSinceMs = 0, lastLocalKeyMs = 0;
 
 struct Label {
   char text[proto::MAX_LABEL + 1] = {0};
@@ -203,6 +241,8 @@ void enterHost() {
 void enterStandalone() {
   if (!host) return;
   host = false;
+  standaloneSinceMs = millis();
+  macDim = false; // the Mac can't wake us any more; the standalone timer takes over
   modeCount = 0;
   for (auto &l : macLabels) l = Label();
   clearFaces();
@@ -427,6 +467,7 @@ void onLayoutChange() {
 
 // ---------------------------------------------------------------- input
 void keyDown(size_t k) {
+  lastLocalKeyMs = millis();
   if (k == modeKey()) { // handled here, never sent
     if (picker) closePicker();
     else openPicker();
@@ -545,6 +586,90 @@ bool loadFace(const char *name, Face &slot) {
   return true;
 }
 
+// ---------------------------------------------------------------- lights
+struct Light {
+  uint8_t mode = proto::LIGHT_EFFECT_2; // the vendor demo's flowing colours
+  uint8_t brightness = 15;
+  uint16_t hue = 20; // warm orange until the Mac says otherwise
+  uint8_t saturation = 80;
+  uint16_t pulseMs = 0;
+};
+Light light;
+uint32_t nextLightStep = 0;
+uint8_t lightShown = 255; // brightness last written in colour mode
+
+bool dimmed() { return macDim || aloneDim; }
+uint8_t lightBrightness() {
+  return dimmed() && light.brightness > DIM_LIGHT_BRIGHTNESS ? DIM_LIGHT_BRIGHTNESS : light.brightness;
+}
+
+void setBacklight(uint8_t percent) {
+  ledcWrite(1, 255 - (uint32_t)percent * 255 / 100); // active-low
+}
+
+void applyBacklight() {
+  bool dim = dimmed() && backlightPercent > DIM_BACKLIGHT_PERCENT;
+  setBacklight(dim ? DIM_BACKLIGHT_PERCENT : backlightPercent);
+}
+
+void showBrightness(uint8_t b) {
+  for (size_t i = 0; i < unitCount; i++) {
+    ledWrite(units[i], REG_LED_BRIGHTNESS, b);
+    ledWrite(units[i], REG_LED_CONTROL_1, LED_SELECT_1);
+    ledWrite(units[i], REG_LED_CONTROL_2, LED_SELECT_2);
+    ledWrite(units[i], REG_LED_CONTROL_1, LED_CTRL_SHOW);
+  }
+  lightShown = b;
+}
+
+// Writes the whole light state to every unit (on change, or a new unit).
+void applyLight() {
+  for (size_t i = 0; i < unitCount; i++) {
+    uint8_t u = units[i];
+    switch (light.mode) {
+    case proto::LIGHT_NORMAL:
+    case proto::LIGHT_EFFECT_1:
+    case proto::LIGHT_EFFECT_2: {
+      uint8_t m = light.mode == proto::LIGHT_NORMAL     ? LED_MODE_NORMAL
+                  : light.mode == proto::LIGHT_EFFECT_1 ? LED_MODE_TEST_1
+                                                        : LED_MODE_TEST_2;
+      ledWrite(u, REG_LED_BRIGHTNESS, lightBrightness());
+      ledWrite(u, REG_LED_MODE, m);
+      break;
+    }
+    default: // off, or a colour
+      ledWrite(u, REG_LED_MODE, LED_MODE_FREE);
+      ledWrite(u, REG_LED_HUE_H, (uint8_t)(light.hue >> 8));
+      ledWrite(u, REG_LED_HUE_L, (uint8_t)light.hue);
+      ledWrite(u, REG_LED_SATURATION, light.saturation);
+      ledWrite(u, REG_LED_CONTROL_1, LED_CTRL_CLEAR);
+      break;
+    }
+  }
+  lightShown = 255;
+  if (light.mode == proto::LIGHT_OFF) showBrightness(0);
+  else if (light.mode == proto::LIGHT_COLOUR) showBrightness(lightBrightness());
+}
+
+// Applies a dim/undim when the wanted state changed.
+void updateDim() {
+  if (dimmed() == dimShown) return;
+  dimShown = dimmed();
+  applyBacklight();
+  applyLight();
+}
+
+// Breathing: brightness follows a smooth curve from 10% to 100% of the set
+// brightness over pulseMs. Only colour mode pulses.
+void stepLight(uint32_t now) {
+  if (light.mode != proto::LIGHT_COLOUR || !light.pulseMs || now < nextLightStep) return;
+  nextLightStep = now + LIGHT_STEP_MS;
+  float phase = (float)(now % light.pulseMs) / light.pulseMs;    // 0..1
+  float level = 0.55f - 0.45f * cosf(phase * 2.0f * (float)PI); // 0.1..1
+  uint8_t b = (uint8_t)(lightBrightness() * level + 0.5f);
+  if (b != lightShown) showBrightness(b);
+}
+
 void handleCommand(const proto::Command &c) {
   switch (c.type) {
   case proto::Cmd::Hello:
@@ -553,6 +678,10 @@ void handleCommand(const proto::Command &c) {
     sendUnits();
     sendLine("INFO psram=%u free=%u faces=%s fs=%s", (unsigned)ESP.getPsramSize(),
              (unsigned)ESP.getFreePsram(), facesOk ? "ok" : "off", fsOk ? "ok" : "off");
+    for (size_t i = 0; i < unitCount; i++) {
+      uint8_t v = 0;
+      if (readReg(units[i], REG_FIRMWARE_VERSION, &v)) sendLine("UNITFW 0x%02x %#x", units[i], v);
+    }
     break;
   case proto::Cmd::Ping:
     if (!host) break; // must say HELLO first
@@ -604,6 +733,22 @@ void handleCommand(const proto::Command &c) {
     if (!loadFace(c.name, f)) sendLine("MISSING %s", c.name);
     break;
   }
+  case proto::Cmd::Light:
+    light.mode = c.lightMode;
+    light.brightness = c.lightBrightness;
+    light.hue = c.lightHue;
+    light.saturation = c.lightSaturation;
+    light.pulseMs = c.lightPulseMs;
+    applyLight();
+    break;
+  case proto::Cmd::Backlight:
+    backlightPercent = c.backlight;
+    applyBacklight();
+    break;
+  case proto::Cmd::Dim:
+    macDim = c.dim;
+    updateDim();
+    break;
   default:
     break;
   }
@@ -624,7 +769,37 @@ void pollSerial() {
 // ---------------------------------------------------------------- main
 void *bigAlloc(size_t n) { return psramFound() ? ps_malloc(n) : malloc(n); }
 
+// ---------------------------------------------------------------- USB recovery
+// Watches the start-of-frame counter: it only advances while a host drives
+// the bus. Triggered by bus state alone; no serial command can cause it.
+uint16_t lastSof = 0;
+uint32_t lastSofChangeMs = 0, usbReturnedMs = 0;
+bool usbGone = false;
+
+void reconnectUsb() {
+  USB_SERIAL_JTAG.conf0.pad_pull_override = 1;
+  USB_SERIAL_JTAG.conf0.dp_pullup = 0; // the host sees an unplug
+  delay(USB_DETACH_MS);
+  ESP.restart();
+}
+
+void watchUsb(uint32_t now) {
+  uint16_t f = USB_SERIAL_JTAG.fram_num.sof_frame_index;
+  if (f != lastSof) {
+    if (usbGone) usbReturnedMs = now ? now : 1;
+    usbGone = false;
+    lastSof = f;
+    lastSofChangeMs = now;
+  } else if (now - lastSofChangeMs > USB_GONE_MS) {
+    usbGone = true; // seen unchanged by a sample, not inferred from a long stall
+  }
+  if (host) usbReturnedMs = 0;
+  if (usbReturnedMs && now - usbReturnedMs > USB_RECOVER_MS) reconnectUsb();
+}
+
 void setup() {
+  // Undo reconnectUsb()'s override, which can survive a software reset.
+  USB_SERIAL_JTAG.conf0.pad_pull_override = 0;
   // A screen draw blocks for ~80 ms; the default 256-byte RX buffer would
   // drop image data meanwhile.
   Serial.setRxBufferSize(32768);
@@ -646,7 +821,7 @@ void setup() {
   uint32_t rstReleased = millis();
   ledcSetup(1, 20000, 8);
   ledcAttachPin(PIN_LCD_BL, 1);
-  ledcWrite(1, 0); // full brightness (active-low)
+  setBacklight(100);
 
   canvas->begin(GFX_SKIP_OUTPUT_BEGIN);
   tilted = (uint16_t *)bigAlloc(W * H * 2);
@@ -668,6 +843,9 @@ void setup() {
   scanUnits();
   while (millis() - rstReleased < 1200) delay(10); // panels need >1 s after reset
   initScreens();
+  applyLight();
+  lastSof = USB_SERIAL_JTAG.fram_num.sof_frame_index;
+  lastSofChangeMs = millis(); // a bus already up at boot is not a "return"
 }
 
 uint32_t nextUnitScan = 0;
@@ -687,8 +865,19 @@ void loop() {
   }
   if (picker && now - pickerTouchedMs > PICKER_TIMEOUT_MS) closePicker();
   if (now >= nextUnitScan) {
-    if (scanUnits()) onLayoutChange();
+    if (scanUnits()) {
+      onLayoutChange();
+      applyLight(); // a newly attached unit starts dark
+    }
     nextUnitScan = now + UNIT_SCAN_EVERY_MS;
   }
+  {
+    uint32_t quietSince = standaloneSinceMs;
+    if ((int32_t)(lastLocalKeyMs - quietSince) > 0) quietSince = lastLocalKeyMs;
+    aloneDim = !host && now - quietSince > STANDALONE_DIM_MS;
+    updateDim();
+  }
+  stepLight(now);
+  watchUsb(now);
   drawNextDirty();
 }
